@@ -10,6 +10,7 @@ class EdgeDetect(Preview):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.analyzed_texture = None
+        process_click(cv2.EVENT_LBUTTONDOWN, 50, 50, None, None, "Ketra Bulb")
 
     ####################################
     # Analyze a Frame - NOT on UI Thread
@@ -34,7 +35,7 @@ class EdgeDetect(Preview):
         # rgba   = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGBA)
 
         vid(frame=rgba)
-        cv2.setMouseCallback('light sources', process_click)
+        #cv2.setMouseCallback('light sources', process_click)
         pixels = rgba.tostring()
         self.make_thread_safe(pixels, image_size) 
 
@@ -95,21 +96,21 @@ def find_light_sources(image, thresh):
     contours, hierarchy = cv2.findContours(mat, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
     for c in contours:
-        print("FOOOO COUNTOUR")
         x, y, w, h = cv2.boundingRect(c)
         center, radius = cv2.minEnclosingCircle(c)
         center_point = (int(center[0]), int(center[1]))
         area = 3.14 * radius * radius
         if 100 <= area <= 50000:
-            print("FOOOO area")
+            # print("FOOOO area")
             if found_selected(int(center[0]), int(center[1]), radius):
-                color = (0, 0, 255)
-            else:
+                print("found_selected")
                 color = (255, 0, 0)
+            else:
+                color = (0, 0, 255)
             r = ((x, y), (x + w, y + h))
             image = cv2.circle(image, center_point, int(radius), color)
     for s in selections:
-        cv2.putText(image, s, (selections[s][0], selections[s][1]), cv2.QT_FONT_NORMAL, 0.5, (0, 0, 255))
+        cv2.putText(image, s, (selections[s][0], selections[s][1]), cv2.QT_FONT_NORMAL, 0.5, (255, 0, 0))
 def process_click(event, x, y, flags, param, name=None):
     global selections
     global selection_number

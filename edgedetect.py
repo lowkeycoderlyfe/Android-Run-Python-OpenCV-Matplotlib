@@ -1,17 +1,67 @@
-from kivy.clock import mainthread
+from kivy.clock import Clock, mainthread
 from kivy.graphics import Color, Rectangle
 from kivy.graphics.texture import Texture
 import numpy as np
 import cv2
+import threading
+cv = cv2
 from camera4kivy import Preview
+from gestures4kivy import CommonGestures
 
-class EdgeDetect(Preview):
+# import matplotlib
+# matplotlib.use('module://foo.backend_kivy')
+from foo.backend_kivyagg import FigureCanvasKivy
+import matplotlib.pyplot as plt
+from kivy.uix.boxlayout import BoxLayout
+from kivy.app import App
 
+class EdgeDetect(Preview, CommonGestures):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.analyzed_texture = None
-        process_click(cv2.EVENT_LBUTTONDOWN, 50, 50, None, None, "Ketra Bulb")
+        Clock.schedule_once(self.after_init)
 
+    def after_init(self, dt):
+        global ax_td
+        global ax_fd
+        global canvas
+        fig, axs = plt.subplots()
+        temp_fig, temp_axs = plt.subplots()
+        # ax_td = axs[0]
+        # ax_fd = axs[1]
+        ax_td = temp_axs
+        ax_fd = axs
+        ax_td.set_ylabel("Intensity over Time")
+        ax_td.set_xlabel("Frame (@%dfps)" % fps)
+        ax_fd.set_ylabel("Intensity by Frequency", size=24)
+        # ax_fd.set_xlabel("F (Hz)")
+        ax_fd.set_xlabel("F (f_scalar)", size=24)
+        canvas = FigureCanvasKivy(fig)
+        root = App.get_running_app().root
+        # Undo what Preview constructor does
+        root.remove_widget(self)
+        box = BoxLayout(orientation='vertical', spacing=20)
+        box.add_widget(self)
+        box.add_widget(canvas)
+        root.add_widget(box)
+
+    def cg_tap(self, touch, x, y):
+        w, h = 405, 720
+        print("Touch:", x, y, touch.sx, touch.sy, touch.ox, touch.oy)
+        x = int(touch.sx*w)
+        y = (h - int(touch.sy*h))
+        if y < 0:
+            print('NEGATIVE!', y)
+            y = 0
+        process_click(x, y)
+
+    def cg_long_press(self, touch, x, y):
+        selections_lock.acquire()
+        global selections
+        global selection_number
+        selections = {}
+        selection_number = 0
+        selections_lock.release()
     ####################################
     # Analyze a Frame - NOT on UI Thread
     ####################################
@@ -22,22 +72,22 @@ class EdgeDetect(Preview):
         # image_pos    : location of Texture in Preview (due to letterbox)
         # scale  : scale from Analysis resolution to Preview resolution
         # mirror : true if Preview is mirrored
-        
+        # print("Pixels:", image_size, scale)
         rgba   = np.fromstring(pixels, np.uint8).reshape(image_size[1],
                                                          image_size[0], 4)
         # Note, analyze_resolution changes the result. Because with a smaller
         # resolution the gradients are higher and more edges are detected.
-        
+
         # ref https://likegeeks.com/python-image-processing/
         # gray   = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
         # blur   = cv2.GaussianBlur(gray, (3,3), 0)
         # edges  = cv2.Canny(blur,50,100)
         # rgba   = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGBA)
-
+        selections_lock.acquire()
         vid(frame=rgba)
-        #cv2.setMouseCallback('light sources', process_click)
+        selections_lock.release()
         pixels = rgba.tostring()
-        self.make_thread_safe(pixels, image_size) 
+        self.make_thread_safe(pixels, image_size)
 
     @mainthread
     def make_thread_safe(self, pixels, size):
@@ -58,20 +108,10 @@ class EdgeDetect(Preview):
         # pos     : location of Texture in Preview Widget (letterbox)
         # Add the analyzed image
         if self.analyzed_texture:
+            # print("UI texture: ", tex_size)
             Color(1,1,1,1)
             Rectangle(texture= self.analyzed_texture,
                       size = tex_size, pos = tex_pos)
-
-
-
-
-selections = {}
-selection_number = 0
-
-camera_num = 1
-
-working_devices = {}
-
 
 def found_selected(fx, fy, fr):
     for s in selections:
@@ -82,6 +122,7 @@ def found_selected(fx, fy, fr):
             if fr > r:
                 selections[s] = (fx, fy, fr)
             return True
+
 def find_light_sources(image, thresh):
     med = cv2.GaussianBlur(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), (15, 15), 0)
     mean, stddev = cv2.meanStdDev(med)
@@ -101,47 +142,97 @@ def find_light_sources(image, thresh):
         center_point = (int(center[0]), int(center[1]))
         area = 3.14 * radius * radius
         if 100 <= area <= 50000:
-            # print("FOOOO area")
             if found_selected(int(center[0]), int(center[1]), radius):
-                print("found_selected")
                 color = (255, 0, 0)
             else:
                 color = (0, 0, 255)
             r = ((x, y), (x + w, y + h))
             image = cv2.circle(image, center_point, int(radius), color)
     for s in selections:
-        cv2.putText(image, s, (selections[s][0], selections[s][1]), cv2.QT_FONT_NORMAL, 0.5, (255, 0, 0))
-def process_click(event, x, y, flags, param, name=None):
+        cv2.putText(image, s, (selections[s][0], selections[s][1]), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.FILLED)
+
+
+def process_click(x, y, name=None):
+    selections_lock.acquire()
     global selections
     global selection_number
+    name = name if name is not None else chr(ord('A') + selection_number)
+    print(name, x, y)
+    selections[name] = (x, y, 0)
+    selection_number += 1
+    selections_lock.release()
 
-    if event == cv2.EVENT_LBUTTONDOWN:
-        name = name if name is not None else chr(ord('A') + selection_number)
-        print(name, x, y)
-        selections[name] = (x, y, 0)
-        selection_number += 1
+
+selections_lock = threading.Lock()
+selections = {}
+selection_number = 0
+ax_td = None
+ax_fd = None
+canvas = None
+thresh = 230
+intensities = {}
+frames_rem = 0
+freqs = np.arange(0, 7 + 1, 1)
+fps = 30
+cap_frames = 2 * fps
+
+
 def vid(frame):
-    thresh = 230
-    intensities = {}
-    frames_rem = 0
-    # ax_fooo = axs[2]
-    freqs = np.arange(0, 7 + 1, 1)
-    # print(freqs)
-    spectrum = np.absolute(np.fft.rfft([0, 2, 5, 30, 40, 0, 2, 5]))
-    # print(spectrum)
-    find_light_sources(image=frame, thresh=230)
-    # cap = cv2.VideoCapture(camera_num)
-    # if not cap.isOpened():
-    #     print("Cannot open camera")
-    # fps = cap.get(cv2.CAP_PROP_FPS)
-    # cap_frames = 2 * fps
-    # ret, frame = cap.read()
+    global thresh
+    global intensities
+    global frames_rem
+    global freqs
+    global fps
+    global cap_frames
+    global ax_td
+    global ax_fd
+    global canvas
+    # Our operations on the frame come here
+    gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+    find_light_sources(frame, thresh)
+    # Display the resulting frame
+    gray = cv.rectangle(gray, (294, 105), (312, 132), (255, 0, 0))
+    if frames_rem:
+        for s in selections:
+            if s in intensities:
+                # pixel = gray[selections['A'][1], selections['A'][0]]
+                circle_mask = np.zeros((gray.shape[0], gray.shape[1]), np.uint8)
+                circle = selections[s]
+                radius = circle[2]
+                cv.circle(circle_mask, (circle[0], circle[1]), int(radius), (255, 255, 255), 5)
+                mean = cv.mean(gray, circle_mask)
+                intensities[s].append(mean[0])
+        frames_rem -= 1
+        if not frames_rem:
+            ax_td.cla()
+            ax_fd.containers = []
+            ax_fd.collections = []
+            ax_fd.lines = []
+            # ax_fd.cla()
+            ax_fd.grid(True)
+            for s in selections:
+                if s in intensities and len(intensities[s]) == cap_frames:
+                    spectrum = np.absolute(np.fft.rfft(intensities[s]))
+                    spectrum[0] = 0
+                    y_axis_data = spectrum[:len(freqs)]
+                    td_lines = ax_td.plot(intensities[s], label=s)
+                    markerline, stemlines, _ = ax_fd.stem(freqs, y_axis_data, label=s, basefmt="None",
+                                                          use_line_collection=True)
+                    plt.setp(markerline, 'color', plt.getp(td_lines[0], 'color'))
+                    plt.setp(stemlines, 'color', plt.getp(td_lines[0], 'color'))
+                    # Plot derivative. A->A'
+                    # ax_fooo.plot(freqs, np.gradient(y_axis_data), label=s+"'", marker='o')
+            ax_fd.legend(loc='best')
+            draw_canvas_thread_safe()
+            for s in selections:
+                intensities[s] = []
+            frames_rem = cap_frames
+    elif len(selections):
+        for s in selections:
+            intensities[s] = []
+        frames_rem = cap_frames
 
-
-
-
-
-
-
-
-
+@mainthread
+def draw_canvas_thread_safe():
+    global canvas
+    canvas.draw()

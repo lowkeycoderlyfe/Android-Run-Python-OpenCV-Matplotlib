@@ -10,7 +10,7 @@ from gestures4kivy import CommonGestures
 
 # import matplotlib
 # matplotlib.use('module://foo.backend_kivy')
-from foo.backend_kivyagg import FigureCanvasKivy
+from kivy_garden_local_copy.matplotlib.backend_kivyagg import FigureCanvasKivy
 import matplotlib.pyplot as plt
 from kivy.uix.boxlayout import BoxLayout
 from kivy.app import App
